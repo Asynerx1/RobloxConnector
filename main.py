@@ -1,7 +1,7 @@
-
 import os
 import subprocess
-from flask import Flask, request, jsonify, send_file, render_template
+import json 
+from flask import Flask, request, jsonify, send_file, render_template, send_from_directory
 from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
@@ -55,23 +55,38 @@ def process_video():
         video_path = download_youtube_video(video_url, video_id)
         strip_dir, strip_count = generate_strips(video_path, video_id)
 
-        return jsonify({
+        config = {
             "video_id": video_id,
             "strip_count": strip_count,
             "frames_per_strip": FRAMES_PER_STRIP,
             "fps": FPS,
-            "resolution": RESOLUTION,
-            "base_url": f"/strips/{video_id}/strip_{{index}}.jpg"
-        })
+            "resolution": RESOLUTION
+        }
+        with open(os.path.join(OUTPUT_DIR, "config.json"), "w") as f:
+            json.dump(config, f)
+
+        return jsonify(config)
     except subprocess.CalledProcessError as e:
         return jsonify({"error": f"Processing failed: {e}"}), 500
 
 @app.route("/strips/<video_id>/<filename>")
 def serve_strip(video_id, filename):
     return send_from_directory(os.path.join(OUTPUT_DIR, video_id), filename)
+
+@app.route("/current")
+def current_video():
+    config_path = os.path.join(OUTPUT_DIR, "config.json")
+    if not os.path.exists(config_path):
+        return jsonify({"error": "No current video"}), 404
+
+    with open(config_path, "r") as f:
+        config = json.load(f)
+
+    return jsonify(config)
+
 @app.route("/")
 def index():
     return "Server is running!"
-    
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
