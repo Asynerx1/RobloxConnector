@@ -2,13 +2,12 @@ import os
 import subprocess
 import json
 from flask import Flask, request, jsonify, render_template, send_from_directory
-from werkzeug.utils import secure_filename
 from urllib.parse import urlparse, parse_qs 
 
 app = Flask(__name__)
 
-OUTPUT_DIR = "runtime"
-FRAMES_PER_STRIP = 10
+OUTPUT_DIR = "/tmp/runtime"
+FRAMES_PER_STRIP = 1
 FPS = 15
 RESOLUTION = "320x180"
 
@@ -70,9 +69,9 @@ def process_video():
         strip_dir, strip_count = generate_strips(video_path, video_id)
 
         config = {
-            "video_id": video_id,            
+            "video_id": video_id,
             "strip_count": strip_count,
-            "frames_per_strip": 1,
+            "frames_per_strip": FRAMES_PER_STRIP,
             "fps": FPS,
             "resolution": RESOLUTION
         }
