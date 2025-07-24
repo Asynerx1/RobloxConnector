@@ -45,19 +45,20 @@ def download_youtube_video(video_url, video_id):
         dst.write(src.read())
 
     command = [
-    "yt-dlp",
-    "--verbose",
-    "--cookies", temp_cookies_path,
-    "-f", "mp4",
-    "-o", output_path,
-    video_url
-]
+        "yt-dlp",
+        "--verbose",
+        "--cookies", temp_cookies_path,
+        "-f", "mp4",
+        "-o", output_path,
+        video_url
+    ]
     result = subprocess.run(command, capture_output=True, text=True)
-print("yt-dlp STDOUT:", result.stdout)
-print("yt-dlp STDERR:", result.stderr)
-result.check_returncode()  # Raises if yt-dlp failed
+    print("yt-dlp STDOUT:", result.stdout)
+    print("yt-dlp STDERR:", result.stderr)
+    result.check_returncode()  
 
     return output_path
+
 
 def generate_strips(video_path, video_id):
     strip_dir = os.path.join(OUTPUT_DIR, "strips", video_id)
