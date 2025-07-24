@@ -1,88 +1,113 @@
-from flask import Flask, request, jsonify, send_from_directory
 import os
-import tempfile
-import yt_dlp
 import subprocess
-import uuid
-from pathlib import Path
+import json
+from flask import Flask, request, jsonify, render_template, send_from_directory
+from werkzeug.utils import secure_filename
+from urllib.parse import urlparse, parse_qs 
 
 app = Flask(__name__)
 
-TEMP_DIR = os.path.join(tempfile.gettempdir(), "roblox_strips")
-os.makedirs(TEMP_DIR, exist_ok=True)
+OUTPUT_DIR = "runtime"
+FRAMES_PER_STRIP = 10
+FPS = 15
+RESOLUTION = "320x180"
 
-CURRENT_VIDEO_CONFIG = None  # in-memory
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-def slice_video(video_url, video_id):
-    video_dir = os.path.join(TEMP_DIR, video_id)
-    os.makedirs(video_dir, exist_ok=True)
+@app.route("/admin")
+def admin_panel():
+    return render_template("admin.html")
 
-    output_path = os.path.join(video_dir, "video.mp4")
+def extract_video_id(url):
+    try:
+        if "youtube.com" in url:
+            return parse_qs(urlparse(url).query).get("v", [""])[0]
+        elif "youtu.be" in url:
+            return urlparse(url).path.strip("/")
+    except:
+        pass
+    return "unknown"
 
-    # Download using yt-dlp
-    ydl_opts = {
-        'outtmpl': output_path,
-        'format': 'bestvideo[ext=mp4]+bestaudio/best',
-        'quiet': True,
-        'merge_output_format': 'mp4',
-    }
-
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        ydl.download([video_url])
-
-    # Use ffmpeg to create strip frames
-    # Output: strip_000.jpg, strip_001.jpg, etc.
-    strip_pattern = os.path.join(video_dir, "strip_%03d.jpg")
-    fps = 15
-    cmd = [
-        "ffmpeg", "-y", "-i", output_path,
-        "-vf", f"fps={fps},scale=320:180",
-        strip_pattern
+def download_youtube_video(video_url, video_id):
+    output_path = os.path.join(OUTPUT_DIR, f"{video_id}.mp4")
+    command = [
+        "yt-dlp",
+        "-f", "mp4",
+        "-o", output_path,
+        video_url
     ]
-    subprocess.run(cmd, check=True)
+    subprocess.run(command, check=True)
+    return output_path
 
-    # Count generated strips
-    strip_count = len(list(Path(video_dir).glob("strip_*.jpg")))
+def generate_strips(video_path, video_id):
+    strip_dir = os.path.join(OUTPUT_DIR, "strips", video_id)
+    os.makedirs(strip_dir, exist_ok=True)
 
-    return {
-        "video_id": video_id,
-        "fps": fps,
-        "resolution": "320x180",
-        "frames_per_strip": 1,
-        "strip_count": strip_count
-    }
+    command = [
+        "ffmpeg",
+        "-i", video_path,
+        "-vf", f"fps={FPS},scale={RESOLUTION}",
+        f"{strip_dir}/strip_%03d.jpg"
+    ]
+    subprocess.run(command, check=True)
 
-@app.route("/current", methods=["GET", "POST"])
-def current():
-    global CURRENT_VIDEO_CONFIG
+    strip_files = sorted(f for f in os.listdir(strip_dir) if f.endswith(".jpg"))
+    return strip_dir, len(strip_files)
 
-    if request.method == "POST":
-        data = request.json
-        video_url = data.get("video_url")
-        if not video_url:
-            return "Missing 'video_url'", 400
+@app.route("/process", methods=["POST"])
+def process_video():
+    data = request.json
+    video_url = data.get("url")
+    if not video_url:
+        return jsonify({"error": "No URL provided"}), 400
 
-        video_id = video_url.split("v=")[-1].split("&")[0]
-        config = slice_video(video_url, video_id)
-        CURRENT_VIDEO_CONFIG = config
+    video_id = extract_video_id(video_url)
+    if not video_id or video_id == "unknown":
+        return jsonify({"error": "Invalid YouTube URL"}), 400
+
+    try:
+        video_path = download_youtube_video(video_url, video_id)
+        strip_dir, strip_count = generate_strips(video_path, video_id)
+
+        config = {
+            "video_id": video_id,
+            "strip_count": strip_count,
+            "frames_per_strip": 1,
+            "fps": FPS,
+            "resolution": RESOLUTION
+        }
+
+        with open(os.path.join(OUTPUT_DIR, "current.json"), "w") as f:
+            json.dump(config, f)
+
         return jsonify(config)
-
-    elif request.method == "GET":
-        if CURRENT_VIDEO_CONFIG:
-            return jsonify(CURRENT_VIDEO_CONFIG)
-        else:
-            return "No video loaded", 404
+    except subprocess.CalledProcessError as e:
+        return jsonify({"error": f"Processing failed: {e}"}), 500
 
 @app.route("/strips/<video_id>/<filename>")
 def serve_strip(video_id, filename):
-    video_dir = os.path.join(TEMP_DIR, video_id)
-    full_path = os.path.join(video_dir, filename)
+    return send_from_directory(os.path.join(OUTPUT_DIR, "strips", video_id), filename)
 
-    if not os.path.exists(full_path):
-        return f"{filename} not found", 404
+@app.route("/current", methods=["GET", "POST"])
+def current():
+    config_path = os.path.join(OUTPUT_DIR, "current.json")
 
-    return send_from_directory(video_dir, filename)
+    if request.method == "POST":
+        data = request.get_json()
+        with open(config_path, "w") as f:
+            json.dump(data, f)
+        return jsonify({"status": "ok"})
+
+    elif request.method == "GET":
+        try:
+            with open(config_path, "r") as f:
+                return jsonify(json.load(f))
+        except FileNotFoundError:
+            return jsonify({"error": "No current video"}), 404
 
 @app.route("/")
 def index():
-    return "✅ Roblox Video Server running!"
+    return "✅ Server is running!"
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)
