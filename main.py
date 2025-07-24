@@ -2,7 +2,7 @@ import os
 import subprocess
 import json
 from flask import Flask, request, jsonify, render_template, send_from_directory
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs 
 
 app = Flask(__name__)
 
@@ -19,11 +19,10 @@ def admin_panel():
 
 def extract_video_id(url):
     try:
-        parsed = urlparse(url)
-        if "youtube.com" in parsed.netloc:
-            return parse_qs(parsed.query).get("v", [""])[0]
-        elif "youtu.be" in parsed.netloc:
-            return parsed.path.lstrip("/")
+        if "youtube.com" in url:
+            return parse_qs(urlparse(url).query).get("v", [""])[0]
+        elif "youtu.be" in url:
+            return urlparse(url).path.strip("/")
     except:
         pass
     return "unknown"
@@ -43,11 +42,14 @@ def generate_strips(video_path, video_id):
     strip_dir = os.path.join(OUTPUT_DIR, "strips", video_id)
     os.makedirs(strip_dir, exist_ok=True)
 
+    # ✅ FIX: Output path must be joined correctly
+    output_pattern = os.path.join(strip_dir, "strip_%03d.jpg")
+
     command = [
         "ffmpeg",
         "-i", video_path,
         "-vf", f"fps={FPS},scale={RESOLUTION}",
-        f"{strip_dir}/strip_%03d.jpg"
+        output_pattern
     ]
     subprocess.run(command, check=True)
 
@@ -70,7 +72,7 @@ def process_video():
         strip_dir, strip_count = generate_strips(video_path, video_id)
 
         config = {
-            "video_id": video_id,  # ✅ Just the ID now
+            "video_id": video_id,
             "strip_count": strip_count,
             "frames_per_strip": FRAMES_PER_STRIP,
             "fps": FPS,
@@ -86,16 +88,17 @@ def process_video():
 
 @app.route("/strips/<video_id>/<filename>")
 def serve_strip(video_id, filename):
-    folder = os.path.join(OUTPUT_DIR, "strips", video_id)
-    filepath = os.path.join(folder, filename)
-    if not os.path.exists(filepath):
+    path = os.path.join(OUTPUT_DIR, "strips", video_id)
+    full_path = os.path.join(path, filename)
+
+    if not os.path.exists(full_path):
         return jsonify({
             "error": "File not found",
-            "path_checked": filepath,
-            "folder_contents": os.listdir(folder) if os.path.isdir(folder) else None
+            "folder_contents": os.listdir(path) if os.path.exists(path) else None,
+            "path_checked": full_path
         }), 404
-    return send_from_directory(folder, filename)
 
+    return send_from_directory(path, filename)
 
 @app.route("/current", methods=["GET", "POST"])
 def current():
@@ -103,9 +106,6 @@ def current():
 
     if request.method == "POST":
         data = request.get_json()
-        # ✅ Force re-parse video_id in case it's a URL
-        raw_url = data.get("video_id", "")
-        data["video_id"] = extract_video_id(raw_url)
         with open(config_path, "w") as f:
             json.dump(data, f)
         return jsonify({"status": "ok"})
