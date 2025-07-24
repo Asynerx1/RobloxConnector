@@ -73,16 +73,21 @@ def process_video():
 def serve_strip(video_id, filename):
     return send_from_directory(os.path.join(OUTPUT_DIR, video_id), filename)
 
-@app.route("/current")
-def current_video():
-    config_path = os.path.join(OUTPUT_DIR, "config.json")
-    if not os.path.exists(config_path):
-        return jsonify({"error": "No current video"}), 404
+@app.route("/current", methods=["GET", "POST"])
+def current():
+    if request.method == "POST":
+        data = request.get_json()
+        os.makedirs("runtime", exist_ok=True)
+        with open("runtime/current.json", "w") as f:
+            json.dump(data, f)
+        return jsonify({"status": "ok"})
 
-    with open(config_path, "r") as f:
-        config = json.load(f)
-
-    return jsonify(config)
+    elif request.method == "GET":
+        try:
+            with open("runtime/current.json", "r") as f:
+                return jsonify(json.load(f))
+        except FileNotFoundError:
+            return jsonify({"error": "No current video"}), 404
 
 @app.route("/")
 def index():
