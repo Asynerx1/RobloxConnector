@@ -52,7 +52,11 @@ def download_youtube_video(video_url, video_id):
     "-o", output_path,
     video_url
 ]
-    subprocess.run(command, check=True)
+    result = subprocess.run(command, capture_output=True, text=True)
+print("yt-dlp STDOUT:", result.stdout)
+print("yt-dlp STDERR:", result.stderr)
+result.check_returncode()  # Raises if yt-dlp failed
+
     return output_path
 
 def generate_strips(video_path, video_id):
