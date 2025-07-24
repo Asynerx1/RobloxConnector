@@ -40,24 +40,21 @@ def extract_video_id(url):
 def download_youtube_video(video_url, video_id):
     output_path = os.path.join(OUTPUT_DIR, f"{video_id}.mp4")
 
-    temp_cookies_path = os.path.join(OUTPUT_DIR, "cookies_temp.txt")
-    with open("/etc/secrets/cookies.txt", "r") as src, open(temp_cookies_path, "w") as dst:
-        dst.write(src.read())
-
     command = [
         "yt-dlp",
         "--verbose",
-        "--cookies", temp_cookies_path,
         "-f", "mp4",
         "-o", output_path,
         video_url
     ]
+
     result = subprocess.run(command, capture_output=True, text=True)
     print("yt-dlp STDOUT:", result.stdout)
     print("yt-dlp STDERR:", result.stderr)
     result.check_returncode()  
 
     return output_path
+
 
 
 def generate_strips(video_path, video_id):
