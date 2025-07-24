@@ -86,7 +86,16 @@ def process_video():
 
 @app.route("/strips/<video_id>/<filename>")
 def serve_strip(video_id, filename):
-    return send_from_directory(os.path.join(OUTPUT_DIR, "strips", video_id), filename)
+    folder = os.path.join(OUTPUT_DIR, "strips", video_id)
+    filepath = os.path.join(folder, filename)
+    if not os.path.exists(filepath):
+        return jsonify({
+            "error": "File not found",
+            "path_checked": filepath,
+            "folder_contents": os.listdir(folder) if os.path.isdir(folder) else None
+        }), 404
+    return send_from_directory(folder, filename)
+
 
 @app.route("/current", methods=["GET", "POST"])
 def current():
