@@ -70,7 +70,7 @@ def process_video():
         strip_dir, strip_count = generate_strips(video_path, video_id)
 
         config = {
-            "video_id": video_id,
+            "video_id": video_id,            
             "strip_count": strip_count,
             "frames_per_strip": 1,
             "fps": FPS,
