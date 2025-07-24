@@ -10,40 +10,38 @@
 </head>
 <body>
   <h1>🎬 Roblox YouTube Projector</h1>
-  <input type="text" id="videoIdInput" placeholder="Enter processed video_id..." />
-  <button onclick="submit()">Set as Current</button>
+  <input type="text" id="urlInput" placeholder="Enter YouTube video URL..." />
+  <button onclick="submit()">Process & Set as Current</button>
   <div class="status" id="status">Waiting...</div>
 
   <script>
     async function submit() {
-      const videoId = document.getElementById("videoIdInput").value.trim();
+      const url = document.getElementById("urlInput").value.trim();
       const status = document.getElementById("status");
 
-      if (!videoId) {
-        status.textContent = "❌ Please enter a video_id.";
+      if (!url || !url.includes("youtu")) {
+        status.textContent = "❌ Please enter a valid YouTube URL.";
         return;
       }
 
-      const data = {
-        video_id: videoId,
-        strip_count: 25,
-        frames_per_strip: 10,
-        fps: 15,
-        resolution: "320x180"
-      };
-
       try {
-        status.textContent = "Updating /current...";
-        await fetch("/current", {
+        status.textContent = "⏳ Processing video...";
+        const res = await fetch("/process", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(data)
+          body: JSON.stringify({ url })
         });
 
-        status.textContent = "✅ Video set! Clients will update shortly.";
+        const result = await res.json();
+
+        if (res.ok) {
+          status.textContent = `✅ Processed! Video ID: ${result.video_id}`;
+        } else {
+          status.textContent = `❌ Error: ${result.error}`;
+        }
       } catch (err) {
         console.error(err);
-        status.textContent = "❌ Failed to update /current: " + err.message;
+        status.textContent = "❌ Failed to process: " + err.message;
       }
     }
   </script>
