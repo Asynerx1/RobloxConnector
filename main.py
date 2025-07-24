@@ -36,12 +36,13 @@ def download_youtube_video(video_url, video_id):
         dst.write(src.read())
 
     command = [
-        "yt-dlp",
-        "--cookies", temp_cookies_path,
-        "-f", "mp4",
-        "-o", output_path,
-        video_url
-    ]
+    "yt-dlp",
+    "--verbose",
+    "--cookies", temp_cookies_path,
+    "-f", "mp4",
+    "-o", output_path,
+    video_url
+]
     subprocess.run(command, check=True)
     return output_path
 
