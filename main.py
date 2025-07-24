@@ -14,6 +14,15 @@ RESOLUTION = "320x180"
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
+import shutil
+
+@app.route("/debug/binaries")
+def debug_binaries():
+    return jsonify({
+        "yt-dlp": shutil.which("yt-dlp"),
+        "ffmpeg": shutil.which("ffmpeg")
+    })
+
 @app.route("/admin")
 def admin_panel():
     return render_template("admin.html")
