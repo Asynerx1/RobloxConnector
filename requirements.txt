@@ -1,3 +1,5 @@
-Flask
-gunicorn
-yt-dlp
+flask
+flask_cors
+yt_dlp
+opencv-python
+numpy
