@@ -1,136 +1,125 @@
-import os
-import subprocess
-import json
-from flask import Flask, request, jsonify, render_template, send_from_directory
-from werkzeug.utils import secure_filename
-from urllib.parse import urlparse, parse_qs
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+import yt_dlp, os, json, cv2, uuid
+from PIL import Image
+import numpy as np
 
 app = Flask(__name__)
+CORS(app)
 
-OUTPUT_DIR = "/tmp/runtime"
-FRAMES_PER_STRIP = 10
-FPS = 15
-RESOLUTION = "320x180"
+VIDEO_DIR = "videos"
+FRAME_DIR = "frames"
+os.makedirs(VIDEO_DIR, exist_ok=True)
+os.makedirs(FRAME_DIR, exist_ok=True)
 
-os.makedirs(OUTPUT_DIR, exist_ok=True)
+latest_pixel_frame = None  # Unified frame storage for both JSON + PNG uploads
 
-import shutil
-
-@app.route("/debug/binaries")
-def debug_binaries():
-    return jsonify({
-        "yt-dlp": shutil.which("yt-dlp"),
-        "ffmpeg": shutil.which("ffmpeg")
-    })
-
-@app.route("/admin")
-def admin_panel():
-    return render_template("admin.html")
-
-def extract_video_id(url):
-    try:
-        if "youtube.com" in url:
-            return parse_qs(urlparse(url).query).get("v", [""])[0]
-        elif "youtu.be" in url:
-            return urlparse(url).path.strip("/")
-    except:
-        pass
-    return "unknown"
-
-def download_youtube_video(video_url, video_id):
-    output_path = os.path.join(OUTPUT_DIR, f"{video_id}.mp4")
-
-    command = [
-        "yt-dlp",
-        "--verbose",
-        "-f", "mp4",
-        "-o", output_path,
-        video_url
-    ]
-
-    result = subprocess.run(command, capture_output=True, text=True)
-    print("yt-dlp STDOUT:", result.stdout)
-    print("yt-dlp STDERR:", result.stderr)
-    result.check_returncode()  
-
-    return output_path
-
-
-
-def generate_strips(video_path, video_id):
-    strip_dir = os.path.join(OUTPUT_DIR, "strips", video_id)
-    os.makedirs(strip_dir, exist_ok=True)
-
-    command = [
-        "ffmpeg",
-        "-i", video_path,
-        "-vf", f"fps={FPS},scale={RESOLUTION},tile={FRAMES_PER_STRIP}x1",
-        f"{strip_dir}/strip_%03d.jpg"
-    ]
-    subprocess.run(command, check=True)
-
-    strip_files = sorted(f for f in os.listdir(strip_dir) if f.endswith(".jpg"))
-    return strip_dir, len(strip_files)
-
-@app.route("/process", methods=["POST"])
-def process_video():
-    data = request.json
-    video_url = data.get("url")
-    if not video_url:
+@app.route("/submit", methods=["POST"])
+def submit():
+    data = request.get_json()
+    url = data.get("url")
+    if not url:
         return jsonify({"error": "No URL provided"}), 400
 
-    video_id = extract_video_id(video_url)
-    if not video_id or video_id == "unknown":
-        return jsonify({"error": "Invalid YouTube URL"}), 400
+    video_id = str(uuid.uuid4())
+    video_path = os.path.join(VIDEO_DIR, f"{video_id}.mp4")
 
     try:
-        video_path = download_youtube_video(video_url, video_id)
-        strip_dir, strip_count = generate_strips(video_path, video_id)
+        with yt_dlp.YoutubeDL({
+            "format": "mp4",
+            "quiet": True,
+            "outtmpl": video_path
+        }) as ydl:
+            ydl.download([url])
+    except Exception as e:
+        return jsonify({"error": f"Download failed: {e}"}), 500
 
-        config = {
-            "video_id": video_id,
-            "strip_count": strip_count,
-            "frames_per_strip": FRAMES_PER_STRIP,
-            "fps": FPS,
-            "resolution": RESOLUTION,
-            "base_url": f"/strips/{video_id}/strip_{{index}}.jpg"
-        }
+    cap = cv2.VideoCapture(video_path)
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    max_frames = 300
 
-        with open(os.path.join(OUTPUT_DIR, "current.json"), "w") as f:
-            json.dump(config, f)
+    width, height = 150, 100
+    frames = []
+    frame_idx = 0
 
-        return jsonify(config)
-    except subprocess.CalledProcessError as e:
-        return jsonify({"error": f"Processing failed: {e}"}), 500
+    while frame_idx < max_frames:
+        ret, frame = cap.read()
+        if not ret:
+            break
 
-@app.route("/strips/<video_id>/<filename>")
-def serve_strip(video_id, filename):
-    folder = os.path.join(OUTPUT_DIR, "strips", video_id)
-    full_path = os.path.join(folder, filename)
-    if not os.path.exists(full_path):
-        return jsonify({"error": "File not found", "folder_contents": os.listdir(folder) if os.path.exists(folder) else None, "path_checked": full_path}), 404
-    return send_from_directory(folder, filename)
+        if frame_idx % int(max(fps / 15, 1)) == 0:
+            resized = cv2.resize(frame, (width, height))
+            rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
+            frame_data = rgb.tolist()
 
-@app.route("/current", methods=["GET", "POST"])
-def current():
-    config_path = os.path.join(OUTPUT_DIR, "current.json")
+            json_path = os.path.join(FRAME_DIR, f"{video_id}_frame_{len(frames):03}.json")
+            with open(json_path, "w") as f:
+                json.dump(frame_data, f)
 
-    if request.method == "POST":
-        data = request.get_json()
-        with open(config_path, "w") as f:
-            json.dump(data, f)
-        return jsonify({"status": "ok"})
+            frames.append(f"/frame/{video_id}/{len(frames):03}")
 
-    elif request.method == "GET":
-        try:
-            with open(config_path, "r") as f:
-                return jsonify(json.load(f))
-        except FileNotFoundError:
-            return jsonify({"error": "No current video"}), 404
+        frame_idx += 1
+
+    cap.release()
+
+    return jsonify({
+        "video_id": video_id,
+        "fps": 15,
+        "frame_count": len(frames),
+        "width": width,
+        "height": height,
+        "frame_urls": frames
+    })
+
+@app.route("/frame/<video_id>/<int:frame_index>")
+def get_frame(video_id, frame_index):
+    frame_file = os.path.join(FRAME_DIR, f"{video_id}_frame_{frame_index:03d}.json")
+    
+    if not os.path.exists(frame_file):
+        return jsonify({"error": "Frame not found"}), 404
+
+    with open(frame_file, "r") as f:
+        frame_data = json.load(f)
+
+    os.remove(frame_file)
+    return jsonify(frame_data)
+
+@app.route("/upload_screenshare", methods=["POST"])
+def upload_screenshare():
+    global latest_pixel_frame
+    frame = request.get_json()
+    if not frame:
+        return jsonify({"error": "No frame provided"}), 400
+
+    latest_pixel_frame = frame
+    return jsonify({"status": "ok"})
+
+@app.route("/upload_screenshare_file", methods=["POST"])
+def upload_screenshare_file():
+    global latest_pixel_frame
+
+    if 'frame' not in request.files:
+        return "Missing frame file", 400
+
+    try:
+        file = request.files['frame']
+        img = Image.open(file).convert("RGB")
+        arr = np.array(img)
+        latest_pixel_frame = arr.tolist()
+        return "OK", 200
+
+    except Exception as e:
+        return f"Error: {e}", 500
+
+@app.route("/screenshare_frame")
+def get_screenshare_frame():
+    if latest_pixel_frame is None:
+        return jsonify({"error": "No frame available"}), 404
+    return jsonify(latest_pixel_frame)
 
 @app.route("/")
-def index():
-    return "✅ Server is running!"
+def root():
+    return "✅ Video Pixel Server Active"
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    app.run(host="0.0.0.0", port=24195)
